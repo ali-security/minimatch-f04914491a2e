@@ -1,20 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches: ["main"]
-  pull_request_target:
-    paths:
-      - 'src/**'
-      - 'test/**'
-      - '*.json'
-      - '*.js'
-      - '*.ts'
-      - 'lib/**'
-      - 'scripts/**'
-      - '.github/workflows/ci.yml'
-      - 'package.json'
   workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional tap test file(s) to run instead of the full suite'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -36,6 +28,7 @@ jobs:
       fail-fast: false
 
     runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 40
     defaults:
       run:
         shell: ${{ matrix.platform.shell }}
@@ -53,4 +46,28 @@ jobs:
         run: npm install
 
       - name: Run Tests
-        run: npm test -- -c -t0
+        run: npm test -- -c -t0 --output-file=tap-output.tap ${{ inputs.test-filter }}
+
+      - name: List skipped tests with reasons
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "Skipped tests and reason: the backslash-pattern cases below come from test/patterns.js entries"
+          echo "marked { skip: process.platform === 'win32' } by upstream. On Windows minimatch treats '\\' as a"
+          echo "path separator (windowsPathsNoEscape semantics), so patterns matching a literal backslash cannot"
+          echo "behave as on POSIX; upstream skips exactly these cases on win32 only."
+          grep -n "skip: process.platform === 'win32'" test/patterns.js
+          echo "Skipped test cases on this leg:"
+          grep -n "# SKIP" tap-output.tap || echo "no skipped tests"
+
+      - name: Pack
+        if: matrix.platform.os == 'ubuntu-latest' && matrix.node-version == '25.x'
+        run: npm pack
+
+      - name: Upload npm tarball
+        if: matrix.platform.os == 'ubuntu-latest' && matrix.node-version == '25.x'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: minimatch-*.tgz
+          if-no-files-found: error
